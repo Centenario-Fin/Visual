@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>高级关系图谱可视化工具 (增强版)</title>
+    <style>
+        /* General Styling */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            display: flex; flex-direction: column; align-items: center;
+            margin: 0; height: 100vh; background-color: #f4f4f9; color: #333; overflow: hidden;
+        }
+        .header {
+            width: 100%; padding: 15px 25px; background-color: #fff;
+            border-bottom: 1px solid #dee2e6;
+            z-index: 10; display: flex; flex-direction: column; align-items: center; box-sizing: border-box;
+        }
+        .title-bar {
+            width: 100%; display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;
+        }
+        h1 { font-size: 24px; margin: 0; color: #343a40; }
+
+        /* Controls Styling */
+        .controls {
+            display: flex; flex-wrap: wrap; gap: 15px 25px; align-items: flex-end; justify-content: center; width: 100%;
+        }
+        .control-group, .info-stat {
+            display: flex; flex-direction: column; align-items: flex-start;
+        }
+        .control-group > label, .info-stat > label {
+            font-weight: 600; font-size: 14px; margin-bottom: 8px; color: #495057;
+        }
+        #model-selector { display: flex; flex-wrap: wrap; gap: 5px 15px; }
+        #model-selector label { font-weight: normal; font-size: 13px; cursor: pointer; display: flex; align-items: center; }
+        #model-selector input { margin-right: 5px; }
+        #filter-container { display: flex; align-items: center; gap: 10px; }
+        input[type="range"] { width: 130px; cursor: pointer; }
+        #filter-value, .stat-value { font-weight: bold; min-width: 40px; font-size: 14px; }
+        #filter-value { color: #e8590c; }
+        .stat-value { color: #1971c2; }
+
+        /* Search & Buttons */
+        #search-container { position: relative; }
+        #search-box { padding: 6px 10px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px; transition: border-color .15s ease-in-out, box-shadow .15s ease-in-out; }
+        #search-box:focus { border-color: #80bdff; outline: 0; box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25); }
+        .styled-btn { padding: 7px 12px; border: 1px solid #6c757d; background-color: #6c757d; color: white; border-radius: 4px; cursor: pointer; font-size: 14px; transition: background-color 0.2s; }
+        .styled-btn:hover:not(:disabled) { background-color: #5a6268; }
+        .styled-btn:disabled { background-color: #adb5bd; border-color: #adb5bd; cursor: not-allowed; }
+
+        /* Custom File Input */
+        .file-upload-btn {
+            background-color: #007bff; color: white; padding: 8px 15px; border-radius: 5px; cursor: pointer;
+            font-size: 14px; font-weight: 500; transition: background-color 0.2s;
+        }
+        .file-upload-btn:hover { background-color: #0056b3; }
+        input[type="file"] { display: none; }
+
+        /* Autocomplete Suggestions */
+        #search-suggestions {
+            position: absolute; top: 100%; left: 0; right: 0; background: white;
+            border: 1px solid #ddd; max-height: 200px; overflow-y: auto; z-index: 1000;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1); border-radius: 4px;
+        }
+        .suggestion-item { padding: 8px 12px; cursor: pointer; font-size: 14px; }
+        .suggestion-item:hover { background-color: #e9ecef; }
+
+        /* Main Container & Graph */
+        .container { display: flex; width: 100%; flex-grow: 1; position: relative; }
+        #graph-container {
+            flex-grow: 1; position: relative; background-color: #fff;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .initial-message { font-size: 1.5em; color: #adb5bd; }
+        svg { background-color: #ffffff; }
+
+        /* Info Panel */
+        #info-panel {
+            width: 450px; flex-shrink: 0; padding: 20px; border-left: 1px solid #ccc; background-color: #fafafa;
+            overflow-y: auto; transition: transform 0.3s ease-in-out; transform: translateX(105%);
+            position: fixed; right: 0; top: 145px; height: calc(100vh - 145px); /* Adjusted top position */
+            box-shadow: -2px 0 8px rgba(0,0,0,0.1); z-index: 100;
+        }
+        #info-panel.visible { transform: translateX(0); }
+        h3 { margin: 0 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #007bff; color: #007bff; }
+        #close-btn { position: absolute; top: 15px; right: 20px; background: none; border: none; font-size: 24px; cursor: pointer; color: #888; }
+
+        /* D3 Elements */
+        .node { stroke: #fff; stroke-width: 1.5px; cursor: pointer; transition: opacity 0.3s ease; }
+        .link { stroke-opacity: 0.6; transition: opacity 0.3s ease; }
+        .node:hover { stroke: #000; stroke-width: 2.5px; }
+        .tooltip { position: absolute; text-align: center; padding: 8px; font: 12px sans-serif; background: rgba(0, 0, 0, 0.8); color: #fff; border-radius: 4px; pointer-events: none; opacity: 0; transition: opacity 0.2s; }
+        #info-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        #info-table th, #info-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        #info-table th { background-color: #e9ecef; font-weight: bold; }
+        #info-table td b { color: #c92a2a; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="title-bar">
+            <h1>高级关系图谱可视化工具</h1>
+            <label for="csv-file" class="file-upload-btn">上传CSV文件</label>
+            <input type="file" id="csv-file" accept=".csv">
+        </div>
+        <div class="controls">
+            <div class="control-group">
+                <label>选择模型 (强度取平均值):</label>
+                <div id="model-selector"><span style="color: #888;">请先上传CSV文件</span></div>
+            </div>
+            <div class="control-group">
+                <label for="strength-filter">过滤弱连接 (阈值 0-1):</label>
+                <div id="filter-container">
+                     <input type="range" id="strength-filter" min="0" max="1" step="0.01" value="0" disabled>
+                     <span id="filter-value">0.00</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <label for="search-box">搜索节点:</label>
+                <div id="search-container">
+                    <input type="text" id="search-box" placeholder="输入节点名称..." disabled>
+                    <div id="search-suggestions" style="display: none;"></div>
+                </div>
+            </div>
+            <div class="control-group">
+                <label> </label> <!-- Placeholder for alignment -->
+                <button id="reset-view-btn" class="styled-btn" disabled>重置视图</button>
+            </div>
+            <div class="info-stat">
+                <label>节点统计:</label>
+                <div>
+                    <span class="stat-value" id="total-nodes-display">N/A</span> (总数) /
+                    <span class="stat-value" id="visible-nodes-display">N/A</span> (当前)
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="container">
+        <div id="graph-container">
+            <div class="initial-message">请点击右上角的 "上传CSV文件" 开始</div>
+        </div>
+        <div id="info-panel">
+            <button id="close-btn">×</button>
+            <h3 id="info-title">节点关系详情</h3>
+            <div id="info-content"></div>
+        </div>
+    </div>
+
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script>
+        // DOM Elements
+        const fileInput = document.getElementById('csv-file');
+        const infoPanel = document.getElementById('info-panel');
+        const closeBtn = document.getElementById('close-btn');
+        const modelSelector = document.getElementById('model-selector');
+        const strengthFilter = document.getElementById('strength-filter');
+        const filterValueSpan = document.getElementById('filter-value');
+        const totalNodesSpan = document.getElementById('total-nodes-display');
+        const visibleNodesSpan = document.getElementById('visible-nodes-display');
+        const searchBox = document.getElementById('search-box');
+        const suggestionsContainer = document.getElementById('search-suggestions');
+        const resetBtn = document.getElementById('reset-view-btn');
+        const graphContainer = document.getElementById('graph-container');
+
+        // SVG and D3 Setup
+        let svg, g, zoom;
+        const tooltip = d3.select("body").append("div").attr("class", "tooltip");
+        const simulation = d3.forceSimulation()
+            .force("charge", d3.forceManyBody().strength(-400))
+            .force("center", d3.forceCenter());
+
+        // Color & Size Scales
+        const linkColorScale = d3.scaleSequential(d3.interpolateOrRd).domain([0, 1]);
+        const nodeColorScale = d3.scaleOrdinal(d3.schemeTableau10); // For colorful nodes
+        const radiusScale = d3.scaleSqrt().range([5, 25]); // For dynamic node size
+
+        // Global State
+        let fullGraphData = { nodes: [], links: [] };
+        let allNodeNames = [];
+        let strengthHeaders = [];
+
+        // Event Listeners
+        fileInput.addEventListener('change', handleFileSelect);
+        closeBtn.addEventListener('click', () => infoPanel.classList.remove('visible'));
+        strengthFilter.addEventListener('input', () => {
+            filterValueSpan.textContent = parseFloat(strengthFilter.value).toFixed(2);
+            updateGraph(); // Live update on slide
+        });
+        searchBox.addEventListener('input', handleSearchInput);
+        resetBtn.addEventListener('click', resetView);
+        window.addEventListener('click', (e) => { // Close suggestions
+            if (!document.getElementById('search-container').contains(e.target)) {
+                suggestionsContainer.style.display = 'none';
+            }
+        });
+
+        // --- Core Functions ---
+        function handleFileSelect(event) {
+            const file = event.target.files[0]; if (!file) return;
+            const reader = new FileReader();
+            reader.onload = e => {
+                // Initialize or reset SVG for new file
+                if (!svg) {
+                    graphContainer.innerHTML = ''; // Clear initial message
+                    svg = d3.select("#graph-container").append("svg").attr("width", "100%").attr("height", "100%");
+                    g = svg.append("g");
+                    zoom = d3.zoom().scaleExtent([0.1, 8]).on("zoom", e => g.attr("transform", e.transform));
+                    svg.call(zoom);
+                }
+                parseCSVAndSetup(e.target.result);
+            }
+            reader.readAsText(file, 'UTF-8');
+        }
+
+        function parseCSVAndSetup(text) {
+            try {
+                const data = d3.csvParse(text);
+                if (!data.columns || data.columns.length < 2) throw new Error("CSV格式不正确。");
+
+                const node1Header = data.columns[0];
+                const node2Header = data.columns[1];
+                strengthHeaders = data.columns.slice(2);
+
+                const nodesMap = new Map();
+                const degreeMap = new Map();
+                const links = [];
+
+                for (const row of data) {
+                    const sourceName = row[node1Header]?.trim();
+                    const targetName = row[node2Header]?.trim();
+                    if (!sourceName || !targetName) continue;
+
+                    // Add nodes to map
+                    if (!nodesMap.has(sourceName)) nodesMap.set(sourceName, { id: sourceName });
+                    if (!nodesMap.has(targetName)) nodesMap.set(targetName, { id: targetName });
+
+                    // Increment degree for both nodes
+                    degreeMap.set(sourceName, (degreeMap.get(sourceName) || 0) + 1);
+                    degreeMap.set(targetName, (degreeMap.get(targetName) || 0) + 1);
+
+                    const strengths = {};
+                    strengthHeaders.forEach(header => {
+                        strengths[header] = parseFloat(row[header]) || 0;
+                    });
+                    links.push({ source: sourceName, target: targetName, strengths });
+                }
+
+                const nodes = Array.from(nodesMap.values()).map(node => ({
+                    ...node,
+                    degree: degreeMap.get(node.id) || 0
+                }));
+
+                // Update radius scale domain based on data
+                const degreeExtent = d3.extent(nodes, d => d.degree);
+                radiusScale.domain(degreeExtent[0] > 0 ? degreeExtent : [0, 1]);
+
+                fullGraphData = { nodes, links };
+                allNodeNames = Array.from(nodesMap.keys());
+
+                // Enable UI controls
+                totalNodesSpan.textContent = nodesMap.size;
+                searchBox.disabled = false;
+                resetBtn.disabled = false;
+                strengthFilter.value = 0;
+                filterValueSpan.textContent = "0.00";
+                strengthFilter.disabled = false;
+
+                setupControls();
+                updateGraph();
+                resetView(); // Center the graph on initial load
+            } catch(e) {
+                alert(`解析文件失败: ${e.message}`);
+                console.error(e);
+            }
+        }
+
+        function updateGraph() {
+            if (!svg) return;
+            const selectedModels = Array.from(modelSelector.querySelectorAll('input:checked')).map(cb => cb.value);
+            const filterValue = parseFloat(strengthFilter.value);
+
+            let processedLinks, processedNodes;
+
+            if (selectedModels.length === 0) {
+                processedLinks = [];
+                processedNodes = [];
+            } else {
+                processedLinks = fullGraphData.links.map(link => {
+                    const sum = selectedModels.reduce((acc, model) => acc + (link.strengths[model] || 0), 0);
+                    const avgStrength = selectedModels.length > 0 ? sum / selectedModels.length : 0;
+                    return { ...link, currentStrength: avgStrength };
+                }).filter(link => link.currentStrength >= filterValue);
+
+                const activeNodeIds = new Set();
+                processedLinks.forEach(link => {
+                    activeNodeIds.add(typeof link.source === 'object' ? link.source.id : link.source);
+                    activeNodeIds.add(typeof link.target === 'object' ? link.target.id : link.target);
+                });
+                processedNodes = fullGraphData.nodes.filter(node => activeNodeIds.has(node.id));
+            }
+
+            visibleNodesSpan.textContent = processedNodes.length;
+
+            // Update links
+            const linkSelection = g.selectAll(".link").data(processedLinks, d => `${d.source.id || d.source}-${d.target.id || d.target}`);
+            linkSelection.exit().remove();
+            linkSelection.enter().append("line")
+                .attr("class", "link")
+              .merge(linkSelection)
+                .attr("stroke", d => linkColorScale(d.currentStrength))
+                .attr("stroke-width", d => 1 + d.currentStrength * 6);
+
+            // Update nodes
+            const nodeSelection = g.selectAll(".node").data(processedNodes, d => d.id);
+            nodeSelection.exit().remove();
+            nodeSelection.enter().append("circle")
+                .attr("class", "node")
+                .call(d3.drag().on("start", dragstarted).on("drag", dragged).on("end", dragended))
+                .on("mouseover", (event, d) => {
+                    tooltip.transition().duration(200).style("opacity", 1);
+                    tooltip.html(d.id).style("left", `${event.pageX + 10}px`).style("top", `${event.pageY - 28}px`);
+                })
+                .on("mouseout", () => tooltip.transition().duration(500).style("opacity", 0))
+                .on("click", (event, d) => displayNodeInfo(d, fullGraphData.links, selectedModels))
+              .merge(nodeSelection)
+                .attr("r", d => radiusScale(d.degree))
+                .style("fill", d => nodeColorScale(d.id));
+
+            simulation.nodes(processedNodes)
+                .force("link", d3.forceLink(processedLinks).id(d => d.id).distance(100).strength(0.1))
+                .force("center").x(graphContainer.clientWidth / 2).y(graphContainer.clientHeight / 2);
+            simulation.alpha(1).restart();
+        }
+
+        // --- Search and Highlight ---
+        function handleSearchInput(event) {
+            const query = event.target.value.trim().toLowerCase();
+            suggestionsContainer.innerHTML = '';
+            if (query.length === 0) {
+                suggestionsContainer.style.display = 'none';
+                return;
+            }
+            const matches = allNodeNames.filter(name => name.toLowerCase().includes(query)).slice(0, 10);
+            matches.forEach(name => {
+                const item = document.createElement('div');
+                item.className = 'suggestion-item';
+                item.textContent = name;
+                item.onclick = () => {
+                    searchBox.value = name;
+                    suggestionsContainer.style.display = 'none';
+                    highlightNode(name);
+                };
+                suggestionsContainer.appendChild(item);
+            });
+            suggestionsContainer.style.display = matches.length > 0 ? 'block' : 'none';
+        }
+
+        function highlightNode(nodeId) {
+            const visibleLinks = g.selectAll('.link').data();
+            const neighbors = new Set([nodeId]);
+            visibleLinks.forEach(link => {
+                const sourceId = link.source.id || link.source;
+                const targetId = link.target.id || link.target;
+                if (sourceId === nodeId) neighbors.add(targetId);
+                if (targetId === nodeId) neighbors.add(sourceId);
+            });
+
+            g.selectAll('.node')
+                .style('opacity', d => neighbors.has(d.id) ? 1 : 0.1)
+                .style('stroke', d => d.id === nodeId ? '#e03131' : '#fff')
+                .style('stroke-width', d => d.id === nodeId ? 3 : 1.5);
+
+            g.selectAll('.link')
+                .style('opacity', d => (d.source.id === nodeId || d.target.id === nodeId) ? 0.9 : 0.05);
+        }
+
+        function resetHighlight() {
+            searchBox.value = '';
+            g.selectAll('.node')
+                .style('opacity', 1)
+                .style('stroke', '#fff')
+                .style('stroke-width', 1.5);
+
+            g.selectAll('.link')
+                .style('opacity', 0.6);
+        }
+
+        function resetView() {
+            if (!svg) return;
+            resetHighlight();
+            svg.transition().duration(750).call(
+                zoom.transform,
+                d3.zoomIdentity,
+                d3.zoomTransform(svg.node()).invert([graphContainer.clientWidth / 2, graphContainer.clientHeight / 2])
+            );
+        }
+
+        // --- Helper Functions ---
+        function setupControls() {
+            modelSelector.innerHTML = '';
+            strengthHeaders.forEach(header => {
+                const label = document.createElement('label');
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.value = header;
+                checkbox.checked = true;
+                checkbox.addEventListener('change', updateGraph);
+                label.appendChild(checkbox);
+                label.appendChild(document.createTextNode(` ${header}`));
+                modelSelector.appendChild(label);
+            });
+        }
+
+        simulation.on("tick", () => {
+            if (!g) return;
+            g.selectAll(".link").attr("x1", d => d.source.x).attr("y1", d => d.source.y).attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+            g.selectAll(".node").attr("cx", d => d.x).attr("cy", d => d.y);
+        });
+
+        function dragstarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x; d.fy = d.y;
+            d3.select(this).raise().attr("stroke", "black");
+        }
+        function dragged(event, d) {
+            d.fx = event.x; d.fy = event.y;
+        }
+        function dragended(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            // Keep d.fx and d.fy to pin the node.
+            d3.select(this).attr("stroke", d.id === searchBox.value ? '#e03131' : '#fff');
+        }
+
+        function displayNodeInfo(nodeData, allLinks, selectedModels) {
+            const connectedLinks = allLinks
+                .filter(l => l.source === nodeData.id || l.target === nodeData.id)
+                .map(link => {
+                    const totalStrength = selectedModels.reduce((sum, model) => sum + (link.strengths[model] || 0), 0);
+                    const avgStrength = selectedModels.length > 0 ? totalStrength / selectedModels.length : 0;
+                    return { ...link, avgStrength };
+                })
+                .sort((a, b) => b.avgStrength - a.avgStrength); // Sort by average strength
+
+            document.getElementById('info-title').textContent = `“${nodeData.id}” 的关系详情`;
+            let tableHTML = `<table id="info-table"><thead><tr><th>关联节点</th>`;
+            selectedModels.forEach(header => { tableHTML += `<th>${header}</th>`; });
+            tableHTML += `<th>平均强度</th></tr></thead><tbody>`;
+
+            connectedLinks.forEach(link => {
+                const otherNodeId = link.source === nodeData.id ? link.target : link.source;
+                let rowHTML = `<tr><td>${otherNodeId}</td>`;
+                selectedModels.forEach(header => {
+                    const value = link.strengths[header] || 0;
+                    rowHTML += `<td>${value.toExponential(4)}</td>`;
+                });
+                rowHTML += `<td><b>${link.avgStrength.toExponential(4)}</b></td></tr>`;
+                // Only show links that are visible with the current filter
+                if (link.avgStrength >= parseFloat(strengthFilter.value)) {
+                    tableHTML += rowHTML;
+                }
+            });
+            tableHTML += `</tbody></table>`;
+            document.getElementById('info-content').innerHTML = tableHTML;
+            infoPanel.classList.add('visible');
+        }
+    </script>
+</body>
+</html>
